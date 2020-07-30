@@ -2,7 +2,6 @@ require 'caracal/core/models/base_model'
 require 'caracal/core/models/border_model'
 require 'caracal/core/models/table_cell_model'
 
-
 module Caracal
   module Core
     module Models
@@ -23,6 +22,12 @@ module Caracal
         const_set(:DEFAULT_TABLE_BORDER_SIZE,       0)          # units in 1/8 points
         const_set(:DEFAULT_TABLE_BORDER_SPACING,    0)          
         
+        attribute = %i[top bottom left right horizontal vertical].collect do |location|
+          %i[color size line spacing].collect do |attr|
+            "table_border_#{location}_#{attr}".to_sym
+          end
+        end.flatten
+
         # accessors
         attr_reader :table_align
         attr_reader :table_width
@@ -30,12 +35,7 @@ module Caracal
         attr_reader :table_border_line
         attr_reader :table_border_size
         attr_reader :table_border_spacing
-        attr_reader :table_border_top         # returns border model
-        attr_reader :table_border_bottom      # returns border model
-        attr_reader :table_border_left        # returns border model
-        attr_reader :table_border_right       # returns border model
-        attr_reader :table_border_horizontal  # returns border model
-        attr_reader :table_border_vertical    # returns border model
+        attr_reader *attribute
         
         # initialization
         def initialize(options={}, &block)
@@ -45,9 +45,14 @@ module Caracal
           @table_border_size    = DEFAULT_TABLE_BORDER_SIZE
           @table_border_spacing = DEFAULT_TABLE_BORDER_SPACING
           
+          %i[top bottom left right horizontal vertical].each do |location|
+            %i[color size line spacing].each do |attr|
+              instance_variable_set("@table_border_#{location}_#{attr}", nil)
+            end
+          end
+
           super options, &block
         end
-        
         
         #-------------------------------------------------------------
         # Public Methods
@@ -72,7 +77,6 @@ module Caracal
         def rows
           @table_data || [[]]
         end
-        
         
         #=============== STYLES ===============================
         
@@ -100,52 +104,65 @@ module Caracal
           end  
         end
         
-        
         #=============== GETTERS ==============================
-        
+
         # border attrs
-        [:top, :bottom, :left, :right, :horizontal, :vertical].each do |m|
-          [:color, :line, :size, :spacing].each do |attr|
-            define_method "table_border_#{ m }_#{ attr }" do
-              model = send("table_border_#{ m }")
-              value = (model) ? model.send("border_#{ attr }") : send("table_border_#{ attr }")
+        %i[top bottom left right horizontal vertical].each do |location|
+          %i[color line size spacing].each do |attr|
+            define_method "table_border_#{location}_#{attr}" do
+              if instance_variable_get("@table_border_#{location}_#{attr}").nil?
+                instance_variable_get("@table_border_#{attr}")
+              else
+                instance_variable_get("@table_border_#{location}_#{attr}")
+              end
             end
           end
-          define_method "table_border_#{ m }_total_size" do
-            model = send("table_border_#{ m }")
-            value = (model) ? model.total_size : table_border_size + (2 * table_border_spacing)
-          end
         end
-        
-        
+
         #=============== SETTERS ==============================
-        
+
         # integers
-        [:border_size, :border_spacing, :width].each do |m|
-          define_method "#{ m }" do |value|
-            instance_variable_set("@table_#{ m }", value.to_i)
+        %i[width border_size size spacing].each_with_index do |attr, i|
+          if i > 1
+            %i[top bottom left right horizontal vertical].each do |location|
+              define_method "border_#{location}_#{attr}" do |value|
+                instance_variable_set("@table_border_#{location}_#{attr}", value.to_i)
+              end
+            end
+          else
+            define_method attr.to_s do |value|
+              instance_variable_set("@table_#{attr}", value.to_i)
+            end
           end
         end
-        
-        # models
-        [:top, :bottom, :left, :right, :horizontal, :vertical].each do |m|
-          define_method "border_#{ m }" do |options = {}, &block|
-            options.merge!({ type: m })
-            instance_variable_set("@table_border_#{ m }", Caracal::Core::Models::BorderModel.new(options, &block))
-          end
-        end
-        
+
         # strings
-        [:border_color].each do |m|
-          define_method "#{ m }" do |value|
-            instance_variable_set("@table_#{ m }", value.to_s)
+        %i[border_color color].each_with_index do |attr, i|
+          if i != 0
+            %i[top bottom left right horizontal vertical].each do |location|
+              define_method "border_#{location}_#{attr}" do |value|
+                instance_variable_set("@table_border_#{location}_#{attr}", value.to_s)
+              end
+            end
+          else
+            define_method attr.to_s do |value|
+              instance_variable_set("@table_#{attr}", value.to_s)
+            end
           end
         end
-        
+
         # symbols
-        [:border_line, :align].each do |m|
-          define_method "#{ m }" do |value|
-            instance_variable_set("@table_#{ m }", value.to_s.to_sym)
+        %i[border_line align line].each_with_index do |attr, i|
+          if i > 1
+            %i[top bottom left right horizontal vertical].each do |location|
+              define_method "border_#{location}_#{attr}" do |value|
+                instance_variable_set("@table_border_#{location}_#{attr}", value.to_s.to_sym)
+              end
+            end
+          else
+            define_method attr.to_s do |value|
+              instance_variable_set("@table_#{attr}", value.to_s.to_sym)
+            end
           end
         end
         
@@ -171,13 +188,11 @@ module Caracal
           end
         end        
         
-        
         #=============== VALIDATION ==============================
         
         def valid?
           cells.first.is_a?(Caracal::Core::Models::TableCellModel)
         end
-        
         
         #-------------------------------------------------------------
         # Private Instance Methods
@@ -193,14 +208,16 @@ module Caracal
         
         def option_keys
           k = []
-          k << [:data, :align, :width]
-          k << [:border_color, :border_line, :border_size, :border_spacing]
-          k << [:border_bottom, :border_left, :border_right, :border_top, :border_horizontal, :border_vertical]
+          k << %i[data align width]
+          k << %i[border_color border_line border_size border_spacing]
+          k << %i[top bottom left right horizontal vertical].collect do |location|
+            %i[color size line spacing].collect do |attr|
+              "border_#{location}_#{attr}".to_sym
+            end
+          end
           k.flatten
         end
-        
       end
-      
     end
   end
 end
